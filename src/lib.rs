@@ -1,4 +1,6 @@
-use jubjub::{AffinePoint, Base, ExtendedPoint, Scalar};
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
+use jubjub::{AffinePoint, Base, ExtendedPoint, Fr, Scalar};
 use rand_core::RngCore;
 
 // Half of the bit length of the chosen prime
@@ -88,6 +90,56 @@ impl PublicKey {
 
         return (encoded_point.unwrap(), phi);
     }
+
+    pub fn sign<T: RngCore>(self, rng: &mut T, message: &str, pk: PrivateKey) -> (Fr, Fr, Fr) {
+        let z_scalar = gen_message_scalar(message);
+        let mut k;
+        assert!(self.0 == FULL_GENERATOR * pk.0, "Invalid private key");
+
+        loop {
+            k = generate_random_scalar(rng);
+            let curve_point = FULL_GENERATOR * k;
+
+            if curve_point.is_identity().unwrap_u8() == 0 {
+                let affine = AffinePoint::from(curve_point);
+                let possible_r = Scalar::from_bytes(&affine.get_u().to_bytes());
+
+                if possible_r.is_some().unwrap_u8() == 1 {
+                    let r = possible_r.unwrap();
+                    let inner = z_scalar + r.mul(&pk.0);
+                    let s = k.invert().unwrap().mul(&inner);
+
+                    if self.verify_sig(r, s, z_scalar) {
+                        return (r, s, z_scalar);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn verify_sig(self, r: Fr, s: Fr, z_scalar: Fr) -> bool {
+        let s_invert = &s.invert().unwrap();
+        let u_1 = z_scalar.mul(s_invert);
+        let u_2 = r.mul(s_invert);
+
+        let point = (FULL_GENERATOR * u_1) + (self.0 * u_2);
+        let possible_r = Scalar::from_bytes(&AffinePoint::from(point).get_u().to_bytes());
+
+        if possible_r.is_some().unwrap_u8() == 1 {
+            return r == possible_r.unwrap();
+        }
+
+        return false;
+    }
+}
+
+pub fn gen_message_scalar(message: &str) -> Fr {
+    let mut hasher = Sha256::new();
+    hasher.input_str(message);
+    let hex = hasher.result_str();
+    let e = hex.as_bytes();
+    let z: [u8; 64] = e[0..64].try_into().unwrap();
+    Scalar::from_bytes_wide(&z)
 }
 
 pub struct Cypher {

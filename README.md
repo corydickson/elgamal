@@ -11,5 +11,5 @@ Fouque, PA., Joux, A., Tibouchi, M. (2013). Injective Encodings to Elliptic Curv
 # Features
 - [x] Generate private/public keys to encrypt and decrypt arbitrary messages
 - [ ] Encrypt symmetric keys by using hashed elgamal
-- [ ] Signature support w/ sha256
+- [x] Signature support w/ sha256
 

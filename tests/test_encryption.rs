@@ -1,8 +1,8 @@
-mod encryption {
+pub mod encryption {
     use elgamal::{generate_random_scalar, Cypher, PrivateKey, PublicKey};
     use jubjub::ExtendedPoint;
 
-    fn alice_gen_keypair() -> (PrivateKey, PublicKey) {
+    pub fn alice_gen_keypair() -> (PrivateKey, PublicKey) {
         let pk = PrivateKey::new(&mut rand::thread_rng());
         let pubkey = PublicKey::derive(pk);
 
