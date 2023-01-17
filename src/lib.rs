@@ -153,40 +153,47 @@ impl Signature {
         return false;
     }
 
-    fn find_sig_points(&self) -> Vec<AffinePoint> {
+    fn find_sig_points<T: RngCore>(&self, rng: &mut T) -> Vec<AffinePoint> {
         let mut points = Vec::new();
+
         let r_int = &BigInt::from_signed_bytes_le(&self.r.to_bytes());
-        let order_int = &BigInt::from_signed_bytes_le(ORDER);
-        let curve_point = FULL_GENERATOR * self.r;
+        let order_int = &BigInt::from_signed_bytes_le(&ORDER[0..32]);
 
         let rn = &(r_int + order_int);
         let r2n = rn + order_int;
 
-        let guess_rn = Scalar::from_bytes(&rn.to_signed_bytes_le()[0..32].try_into().unwrap());
+        // the goal here is to use these values to find a point on the curve where these are the x
+        // values. The problem is that the api currently takes in the byte representation of both
+        // points which we don't have. Therefore finding possible points that can be used to find
+        // the pub key is reduced to this one r because it's certainly within the field
+        let affine = AffinePoint::from_bytes(self.r.to_bytes());
+        if affine.is_some().unwrap_u8() == 1 {
+            points.push(affine.unwrap());
+        }
 
+        let guess_rn = Scalar::from_bytes(&rn.to_signed_bytes_le().try_into().unwrap());
         if guess_rn.is_some().unwrap_u8() == 1 {
-            let guess_rn_point = FULL_GENERATOR * guess_rn.unwrap();
-            let p_rn = AffinePoint::from(guess_rn_point);
-            points.push(p_rn);
+            let affine = AffinePoint::from_bytes(guess_rn.unwrap().to_bytes());
+            if affine.is_some().unwrap_u8() == 1 {
+                points.push(affine.unwrap());
+            }
         }
 
+        //let curve_point = FULL_GENERATOR * k;
+        /*
         let guess_r2n = Scalar::from_bytes(&r2n.to_signed_bytes_le()[0..32].try_into().unwrap());
-
         if guess_r2n.is_some().unwrap_u8() == 1 {
-            let guess_r2n_point = FULL_GENERATOR * guess_r2n.unwrap();
-            let p_r2n = AffinePoint::from(guess_r2n_point);
-            points.push(p_r2n);
+            if guess_r2n.unwrap() == possible_r.unwrap() {
+                points.push(affine);
+            }
         }
-
-        let p_r = AffinePoint::from(curve_point);
-        points.push(p_r);
+        */
 
         return points;
     }
 
     pub fn recover_pubkey(&self, message: &str) -> Vec<ExtendedPoint> {
-        let points = self.find_sig_points();
-
+        let points = self.find_sig_points(&mut rand::thread_rng());
         let z_scalar = Signature::gen_message_scalar(message);
         let u_1 = z_scalar.neg().mul(&self.r);
         let u_2 = self.s.mul(&self.r.invert().unwrap());
