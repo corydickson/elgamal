@@ -1,8 +1,10 @@
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use jubjub::{AffinePoint, Base, ExtendedPoint, Fr, Scalar};
+use num_bigint::BigInt;
 use rand_core::RngCore;
 
+const ORDER: &[u8; 65] = b"0xe7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7";
 // Half of the bit length of the chosen prime
 const MAX_BYTES: usize = 32;
 
@@ -91,8 +93,8 @@ impl PublicKey {
         return (encoded_point.unwrap(), phi);
     }
 
-    pub fn sign<T: RngCore>(self, rng: &mut T, message: &str, pk: PrivateKey) -> (Fr, Fr, Fr) {
-        let z_scalar = gen_message_scalar(message);
+    pub fn sign<T: RngCore>(self, rng: &mut T, message: &str, pk: PrivateKey) -> Signature {
+        let z_scalar = Signature::gen_message_scalar(message);
         let mut k;
         assert!(self.0 == FULL_GENERATOR * pk.0, "Invalid private key");
 
@@ -108,38 +110,103 @@ impl PublicKey {
                     let r = possible_r.unwrap();
                     let inner = z_scalar + r.mul(&pk.0);
                     let s = k.invert().unwrap().mul(&inner);
-
-                    if self.verify_sig(r, s, z_scalar) {
-                        return (r, s, z_scalar);
+                    let sig = Signature { r, s };
+                    // hack: sometimes there is an x coordinate that's not in the scalar field
+                    if sig.verify(self, message) {
+                        return sig;
                     }
                 }
             }
         }
     }
 
-    pub fn verify_sig(self, r: Fr, s: Fr, z_scalar: Fr) -> bool {
-        let s_invert = &s.invert().unwrap();
-        let u_1 = z_scalar.mul(s_invert);
-        let u_2 = r.mul(s_invert);
+}
 
-        let point = (FULL_GENERATOR * u_1) + (self.0 * u_2);
+pub struct Signature {
+    r: Fr,
+    s: Fr,
+}
+
+impl Signature {
+    pub fn gen_message_scalar(message: &str) -> Fr {
+        let mut hasher = Sha256::new();
+        hasher.input_str(message);
+        let hex = hasher.result_str();
+        let e = hex.as_bytes();
+        let z: [u8; 64] = e[0..64].try_into().unwrap();
+        Scalar::from_bytes_wide(&z)
+    }
+
+    pub fn verify(&self, pubkey: PublicKey, message: &str) -> bool {
+        let z_scalar = Signature::gen_message_scalar(message);
+        let s_invert = &self.s.invert().unwrap();
+        let u_1 = z_scalar.mul(s_invert);
+        let u_2 = self.r.mul(s_invert);
+
+        let point = (FULL_GENERATOR * u_1) + (pubkey.get() * u_2);
         let possible_r = Scalar::from_bytes(&AffinePoint::from(point).get_u().to_bytes());
 
         if possible_r.is_some().unwrap_u8() == 1 {
-            return r == possible_r.unwrap();
+            return self.r == possible_r.unwrap();
         }
 
         return false;
     }
-}
 
-pub fn gen_message_scalar(message: &str) -> Fr {
-    let mut hasher = Sha256::new();
-    hasher.input_str(message);
-    let hex = hasher.result_str();
-    let e = hex.as_bytes();
-    let z: [u8; 64] = e[0..64].try_into().unwrap();
-    Scalar::from_bytes_wide(&z)
+    fn find_sig_points<T: RngCore>(&self, rng: &mut T) -> Vec<AffinePoint> {
+        let mut points = Vec::new();
+
+        let r_int = &BigInt::from_signed_bytes_le(&self.r.to_bytes());
+        let order_int = &BigInt::from_signed_bytes_le(&ORDER[0..32]);
+
+        let rn = &(r_int + order_int);
+        let r2n = rn + order_int;
+
+        // the goal here is to use these values to find a point on the curve where these are the x
+        // values. The problem is that the api currently takes in the byte representation of both
+        // points which we don't have. Therefore finding possible points that can be used to find
+        // the pub key is reduced to this one r because it's certainly within the field
+        let affine = AffinePoint::from_bytes(self.r.to_bytes());
+        if affine.is_some().unwrap_u8() == 1 {
+            points.push(affine.unwrap());
+        }
+
+        let guess_rn = Scalar::from_bytes(&rn.to_signed_bytes_le().try_into().unwrap());
+        if guess_rn.is_some().unwrap_u8() == 1 {
+            let affine = AffinePoint::from_bytes(guess_rn.unwrap().to_bytes());
+            if affine.is_some().unwrap_u8() == 1 {
+                points.push(affine.unwrap());
+            }
+        }
+
+        //let curve_point = FULL_GENERATOR * k;
+        /*
+        let guess_r2n = Scalar::from_bytes(&r2n.to_signed_bytes_le()[0..32].try_into().unwrap());
+        if guess_r2n.is_some().unwrap_u8() == 1 {
+            if guess_r2n.unwrap() == possible_r.unwrap() {
+                points.push(affine);
+            }
+        }
+        */
+
+        return points;
+    }
+
+    pub fn recover_pubkey(&self, message: &str) -> Vec<ExtendedPoint> {
+        let points = self.find_sig_points(&mut rand::thread_rng());
+        let z_scalar = Signature::gen_message_scalar(message);
+        let u_1 = z_scalar.neg().mul(&self.r);
+        let u_2 = self.s.mul(&self.r.invert().unwrap());
+
+        let mut possible_keys = Vec::new();
+
+        for p in points {
+            let q = FULL_GENERATOR * u_1 + p * u_2;
+            possible_keys.push(q);
+        }
+
+        return possible_keys;
+    }
 }
 
 pub struct Cypher {

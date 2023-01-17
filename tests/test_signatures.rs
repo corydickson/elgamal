@@ -3,18 +3,14 @@ use test_encryption::encryption::alice_gen_keypair;
 
 mod signatures {
     use crate::alice_gen_keypair;
-    use elgamal::gen_message_scalar;
 
     #[test]
     fn test_sign() {
         let (pk, pubkey) = alice_gen_keypair();
         let message = "Signed Message!!!";
-        let (r, s, computed_scalar) = pubkey.sign(&mut rand::thread_rng(), message, pk);
+        let sig = pubkey.sign(&mut rand::thread_rng(), message, pk);
 
-        let z_scalar = gen_message_scalar(message);
-        assert_eq!(computed_scalar, z_scalar);
-
-        let valid = pubkey.verify_sig(r, s, z_scalar);
+        let valid = sig.verify(pubkey, message);
         assert!(valid);
     }
 
@@ -24,12 +20,9 @@ mod signatures {
         let (_, wrong_pubkey) = alice_gen_keypair();
 
         let message = "Signed Message!!!";
-        let (r, s, computed_scalar) = pubkey.sign(&mut rand::thread_rng(), message, pk);
+        let sig = pubkey.sign(&mut rand::thread_rng(), message, pk);
 
-        let z_scalar = gen_message_scalar(message);
-        assert_eq!(computed_scalar, z_scalar);
-
-        let valid = wrong_pubkey.verify_sig(r, s, z_scalar);
+        let valid = sig.verify(wrong_pubkey, message);
         assert!(!valid);
     }
 
@@ -38,13 +31,10 @@ mod signatures {
         let (pk, pubkey) = alice_gen_keypair();
 
         let message = "Signed Message!!!";
-        let (r, s, computed_scalar) = pubkey.sign(&mut rand::thread_rng(), message, pk);
+        let sig = pubkey.sign(&mut rand::thread_rng(), message, pk);
 
         let wrong_message = "Different message";
-        let z_scalar = gen_message_scalar(wrong_message);
-        assert_ne!(computed_scalar, z_scalar);
-
-        let valid = pubkey.verify_sig(r, s, z_scalar);
+        let valid = sig.verify(pubkey, wrong_message);
         assert!(!valid);
     }
 
@@ -52,15 +42,30 @@ mod signatures {
     #[test]
     fn test_wrong_privatekey() {
         let (_pk, pubkey) = alice_gen_keypair();
-        let (wrong_pk, wrong_pubkey) = alice_gen_keypair();
+        let (wrong_pk, _wrong_pubkey) = alice_gen_keypair();
 
         let message = "Signed Message!!!";
-        let (r, s, computed_scalar) = pubkey.sign(&mut rand::thread_rng(), message, wrong_pk);
+        let sig = pubkey.sign(&mut rand::thread_rng(), message, wrong_pk);
 
-        let z_scalar = gen_message_scalar(message);
-        assert_eq!(computed_scalar, z_scalar);
-
-        let valid = wrong_pubkey.verify_sig(r, s, z_scalar);
+        let valid = sig.verify(pubkey, message);
         assert!(!valid);
     }
+
+    /*
+    #[test]
+    fn test_recover_pubkey() {
+        let (pk, pubkey) = alice_gen_keypair();
+
+        let message = "Signed Message!!!";
+        let sig = pubkey.sign(&mut rand::thread_rng(), message, pk);
+        let possible = sig.recover_pubkey(message);
+        println!("possible n: {:?}, pubkey: {:?}", possible, pubkey);
+
+        for n in possible {
+            if n == pubkey.get() {
+                println!("possible n: {:?}, pubkey: {:?}", n, pubkey);
+            }
+        }
+    }
+    */
 }
