@@ -51,21 +51,20 @@ mod signatures {
         assert!(!valid);
     }
 
-    /*
     #[test]
     fn test_recover_pubkey() {
         let (pk, pubkey) = alice_gen_keypair();
 
         let message = "Signed Message!!!";
         let sig = pubkey.sign(&mut rand::thread_rng(), message, pk);
-        let possible = sig.recover_pubkey(message);
-        println!("possible n: {:?}, pubkey: {:?}", possible, pubkey);
 
+        println!("possible v: {:?}", sig.find_sig_points());
+        let possible = sig.recover_pubkey(message);
+        // println!("possible n: {:?}, pubkey: {:?}", possible, pubkey);
         for n in possible {
             if n == pubkey.get() {
                 println!("possible n: {:?}, pubkey: {:?}", n, pubkey);
             }
         }
     }
-    */
 }
