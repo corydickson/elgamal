@@ -1,6 +1,6 @@
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
-use jubjub::{AffinePoint, Base, ExtendedPoint, Fr, Scalar};
+use jubjub::{AffinePoint, Base, ExtendedPoint, Fr, Scalar, Fq};
 use rand_core::RngCore;
 
 const ORDER: Fr = Fr::from_raw([
