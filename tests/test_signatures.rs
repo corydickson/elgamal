@@ -51,7 +51,6 @@ mod signatures {
         assert!(!valid);
     }
 
-    /*
     #[test]
     fn test_recover_pubkey() {
         let (pk, pubkey) = alice_gen_keypair();
@@ -67,5 +66,4 @@ mod signatures {
             }
         }
     }
-    */
 }

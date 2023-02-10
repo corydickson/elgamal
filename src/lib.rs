@@ -1,10 +1,15 @@
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use jubjub::{AffinePoint, Base, ExtendedPoint, Fr, Scalar};
-use num_bigint::BigInt;
 use rand_core::RngCore;
 
-const ORDER: &[u8; 65] = b"0xe7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7";
+const ORDER: Fr = Fr::from_raw([
+    0x25f8_0bb3_b996_07d9,
+    0xf315_d62f_66b6_e750,
+    0x9325_14ee_eb88_14f4,
+    0x09a6_fc6f_4791_55c6,
+]);
+
 // Half of the bit length of the chosen prime
 const MAX_BYTES: usize = 32;
 
@@ -153,47 +158,63 @@ impl Signature {
         return false;
     }
 
-    fn find_sig_points<T: RngCore>(&self, rng: &mut T) -> Vec<AffinePoint> {
-        let mut points = Vec::new();
+    fn solve_affine_point(u: Fr) -> AffinePoint {
+        // d = -(10240/10241)
 
-        let r_int = &BigInt::from_signed_bytes_le(&self.r.to_bytes());
-        let order_int = &BigInt::from_signed_bytes_le(&ORDER[0..32]);
+        // potential solutions for v:
+        // where u = r, u = r + n, u = r + 2n;
+        // v = +- (7 * sqrt(209) * sqrt(u^2 + 1)) / sqrt(10240u^2  + 10241)
+        let mut a = [0u8; 32];
+        a[0] = *7_u8.to_le_bytes().get(0).unwrap();
+        let mut b = [0u8; 32];
+        b[0] = *209_u8.to_le_bytes().get(0).unwrap();
+        let mut c = [0u8; 32];
+        c[0] = *1_u8.to_le_bytes().get(0).unwrap();
+        let mut d1 = [0u8; 32];
+        d1[0..2].copy_from_slice(&10240_u16.to_le_bytes());
+        let mut d2 = [0u8; 32];
+        d2[0..2].copy_from_slice(&10241_u16.to_le_bytes());
 
-        let rn = &(r_int + order_int);
-        let r2n = rn + order_int;
+        let t: &[u64; 4] = &[
+            0x0000_0000_0000,
+            0x0000_0000_0000,
+            0x0000_0000_0000,
+            0x0000_0000_0001
+        ];
 
+        let numerator =
+            Fr::from_bytes(&a).unwrap() *
+            Fr::from_bytes(&b).unwrap().sqrt().unwrap() *
+            (u.pow(t) + Fr::from_bytes(&c).unwrap()).sqrt().unwrap();
+
+        let denominator = (
+            Fr::from_bytes(&d1).unwrap() *
+            u.pow(t) + Fr::from_bytes(&d2).unwrap()
+        ).sqrt().unwrap();
+        let div = numerator * denominator.invert().unwrap();
+
+        return AffinePoint::from_raw_unchecked(Fq::from_bytes(&u.to_bytes()).unwrap(), Fq::from_bytes(&div.to_bytes()).unwrap());
+        // return AffinePoint::identity()
+    }
+
+    pub fn find_sig_points(&self) -> Vec<AffinePoint> {
         // the goal here is to use these values to find a point on the curve where these are the x
         // values. The problem is that the api currently takes in the byte representation of both
         // points which we don't have. Therefore finding possible points that can be used to find
         // the pub key is reduced to this one r because it's certainly within the field
-        let affine = AffinePoint::from_bytes(self.r.to_bytes());
-        if affine.is_some().unwrap_u8() == 1 {
-            points.push(affine.unwrap());
-        }
+        let mut rn = self.r.clone();
+        rn = rn + &ORDER;
+        let r2n = rn + ORDER;
 
-        let guess_rn = Scalar::from_bytes(&rn.to_signed_bytes_le().try_into().unwrap());
-        if guess_rn.is_some().unwrap_u8() == 1 {
-            let affine = AffinePoint::from_bytes(guess_rn.unwrap().to_bytes());
-            if affine.is_some().unwrap_u8() == 1 {
-                points.push(affine.unwrap());
-            }
-        }
-
-        //let curve_point = FULL_GENERATOR * k;
-        /*
-        let guess_r2n = Scalar::from_bytes(&r2n.to_signed_bytes_le()[0..32].try_into().unwrap());
-        if guess_r2n.is_some().unwrap_u8() == 1 {
-            if guess_r2n.unwrap() == possible_r.unwrap() {
-                points.push(affine);
-            }
-        }
-        */
-
+        let mut points = Vec::new();
+        points.push(Self::solve_affine_point(self.r));
+        points.push(Self::solve_affine_point(rn));
+        points.push(Self::solve_affine_point(r2n));
         return points;
     }
 
     pub fn recover_pubkey(&self, message: &str) -> Vec<ExtendedPoint> {
-        let points = self.find_sig_points(&mut rand::thread_rng());
+        let points = self.find_sig_points();
         let z_scalar = Signature::gen_message_scalar(message);
         let u_1 = z_scalar.neg().mul(&self.r);
         let u_2 = self.s.mul(&self.r.invert().unwrap());
@@ -201,7 +222,7 @@ impl Signature {
         let mut possible_keys = Vec::new();
 
         for p in points {
-            let q = FULL_GENERATOR * u_1 + p * u_2;
+            let q = (FULL_GENERATOR * u_1) + (p * u_2);
             possible_keys.push(q);
         }
 
